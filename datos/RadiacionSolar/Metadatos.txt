@@ -1,0 +1,17 @@
+Latitude (decimal degrees):	40.417
+Longitude (decimal degrees):	-3.703
+Elevation (m):	665
+Radiation database:	PVGIS-SARAH2
+Slope: 36 deg. (optimum)
+Azimuth: -5 deg. (optimum)
+Nominal power of the PV system (c-Si) (kWp):	1.0
+System losses (%):	14.0
+
+P: PV system power (W)
+G(i): Global irradiance on the inclined plane (plane of the array) (W/m2)
+H_sun: Sun height (degree)
+T2m: 2-m air temperature (degree Celsius)
+WS10m: 10-m total wind speed (m/s)
+Int: 1 means solar radiation values are reconstructed
+
+Dates: 2018-2020
