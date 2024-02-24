@@ -1,2 +1,2 @@
 # SmartMicrogrids
-Repositorio para albergar el código del TFG de la rama de INSO
+Repositorio de código para el TFG de la rama de INSO, Smart Microgrids.
