@@ -3,6 +3,16 @@ import numpy as np
 import pandas as pd
 from random import choice as random_choice
 from dataframe_handler import get_dataframe_from_file
+from torchrl.envs import EnvBase
+from torchrl.data import CompositeSpec, BoundedTensorSpec, UnboundedContinuousTensorSpec
+from torchrl.envs.utils import check_env_specs
+import torch
+import torch.nn as nn
+from tensordict import TensorDict
+from tensordict.nn import TensorDictModule
+from collections import defaultdict
+from torchrl.envs.transforms import TransformedEnv, UnsqueezeTransform, CatTensors
+import tqdm
 import copy
 import time
 import sys
@@ -203,26 +213,6 @@ class State:
             self.print_batch_ended()
         else:
             self.hour_iterator += 1
-            # self.progress_bar(
-            #     self.hour_iterator,
-            # )
-
-    def progress_bar(
-        self,
-        iteration,
-        prefix="",
-        suffix="",
-        length=50,
-        fill="█",
-        print_end="\r",
-    ):
-        percent = f"{iteration}"
-        filled_length = int(length * iteration // self.total)
-        bar = fill * filled_length + "-" * (length - filled_length)
-        sys.stdout.write(
-            "\r%s |%s| %s/%s %s" % (prefix, bar, percent, self.total, suffix)
-        )
-        sys.stdout.flush()
 
     def update_class_variables(self, state_vector):
         self.actual_net_power = state_vector[0][0]
@@ -243,40 +233,78 @@ class State:
         state_vector = self.add_actual_battery_value(partial_state_vector)
         self.update_class_variables(state_vector)
         self.iterate_batch()
-        self.state_vector = copy.deepcopy(state_vector)
-        return state_vector
+        self.state_vector = state_vector
+        tensor1 = torch.tensor([self.actual_net_power], dtype=torch.float32)
+        tensor2 = torch.tensor(self.net_power_window, dtype=torch.float32).unsqueeze(0)
+        tensor3 = torch.tensor([self.actual_pv_power], dtype=torch.float32)
+        tensor4 = torch.tensor(self.pv_power_window, dtype=torch.float32).unsqueeze(0)
+        tensor5 = torch.tensor([self.actual_light_pvpc_power], dtype=torch.float32)
+        tensor6 = torch.tensor(self.light_pvpc_window, dtype=torch.float32).unsqueeze(0)
+        tensor7 = torch.tensor([self.actual_battery_power], dtype=torch.float32)
+
+        tensordict = TensorDict(
+            {
+                "net_power": tensor1,
+                "net_power_window": tensor2,
+                "pv_power": tensor3,
+                "pv_power_window": tensor4,
+                "light_pvpc_power": tensor5,
+                "light_pvpc_window": tensor6,
+                "battery_power": tensor7,
+            },
+            batch_size=[1],
+        )  ## Batch_size value of first dimension of tensor.shape if
+        return tensordict
 
 
-class Environment:
+class Environment(EnvBase):
+    batch_locked = False
+
     def __init__(
         self,
         dataframe_historic_data,
+        td_params=None,
+        maximum_house_power=3.3,
+        maximum_pv_power_generation=1.5,
+        maximum_battery_power=2.2,
+        device=None,
+        seed=None,
         alpha=0.6,
     ):
-
-        # self.net_installed_power = net_installed_power
-        # self.pv_installed_power = pv_installed_power
-        # self.battery_capacity = battery_capacity
-        # self.inverse_battery_capacity = inverse_battery_capacity
+        if td_params is None:
+            td_params = self.gen_params()
+        super().__init__(device=device, batch_size=[1])
         self.dataframe_historic_data = dataframe_historic_data
         self.state = State(historic_data=dataframe_historic_data)
         self.current_steps = 0
         self.current_observation = None
         self.alpha = alpha
+        self.maximum_house_power = maximum_house_power
+        self.maximum_pv_power_generation = maximum_pv_power_generation
+        self.maximum_battery_power = maximum_battery_power
+        self._make_spec(td_params)
+        if seed is None:
+            seed = torch.empty((), dtype=torch.int64).random_().item()
+        self._set_seed(seed)
+        # Helpers: _make_step and gen_params
+        gen_params = staticmethod(self.gen_params)
+        _make_spec = self._make_spec
 
-    def flatten(self, xss):
-        return [x for xs in xss for x in xs]
+        # # Mandatory methods: _step, _reset and _set_seed
+        _reset = self._reset
+        _step = staticmethod(self._step)
+        _set_seed = self._set_seed
 
     def __compute_reward(self, action):
         # Compute the reward
         p = self.state.state_vector[0][0]
         f = self.state.state_vector[1][0]
         reward = (
-            -p + f + action
+            -p + f + action["action"]
         ) * self.alpha  ## Esto es lo que hay que cambiar, converge a 0.
         return reward
 
-    def step(self, action):
+    def _step(self, action: TensorDict):
         if self.current_steps == 1024:
             done = True
             self.current_steps = 0
@@ -284,25 +312,171 @@ class Environment:
             done = False
             self.current_steps += 1
         reward = self.__compute_reward(action)
-        new_state = self.flatten(self.state.next_state())
+        new_state = self.state.next_state()
+        new_state["reward"] = torch.tensor([reward])
+        new_state["done"] = torch.tensor([done])
 
-        return new_state, reward, done
+        return new_state
 
-    def reset(self):
+    def _reset(self, tensordict: TensorDict = None):
         self.state = State(historic_data=self.dataframe_historic_data)
-        self.current_observation = self.flatten(self.state.next_state())
+        self.current_observation = self.state.next_state()
         return self.current_observation
+
+    def _set_seed(self, seed):
+        rng = torch.manual_seed(seed)
+        self.rng = rng
+
+    def _make_spec(self, td_params):
+        self.observation_spec = CompositeSpec(
+            net_power=BoundedTensorSpec(
+                shape=(1), dtype=torch.float32, low=0, high=self.maximum_house_power
+            ),
+            net_power_window=BoundedTensorSpec(
+                shape=(1, 23), dtype=torch.float32, low=0, high=self.maximum_house_power
+            ),
+            pv_power=BoundedTensorSpec(
+                shape=(1),
+                dtype=torch.float32,
+                low=0,
+                high=self.maximum_pv_power_generation,
+            ),
+            pv_power_window=BoundedTensorSpec(
+                shape=(1, 23),
+                dtype=torch.float32,
+                low=0,
+                high=self.maximum_pv_power_generation,
+            ),
+            light_pvpc_power=UnboundedContinuousTensorSpec(
+                shape=(1), dtype=torch.float32
+            ),
+            light_pvpc_window=UnboundedContinuousTensorSpec(
+                shape=(1, 23), dtype=torch.float32
+            ),
+            battery_power=BoundedTensorSpec(
+                shape=(1),
+                dtype=torch.float32,
+                low=0,
+                high=self.state.maximum_battery_power,
+            ),
+            shape=([1]),
+        )
+        self.state_spec = self.observation_spec.clone()
+        self.action_spec = BoundedTensorSpec(
+            low=-td_params["battery_power"],
+            high=self.maximum_battery_power - td_params["battery_power"],
+            shape=(1,),
+            dtype=torch.float32,
+        )
+        self.reward_spec = UnboundedContinuousTensorSpec(shape=(*td_params.shape, 1))
+
+    def gen_params(self, batch_size=None):
+        if batch_size is None:
+            batch_size = []
+        td = TensorDict({"battery_power": torch.tensor([0.0])}, batch_size=[])
+        if batch_size:
+            td = td.expand(batch_size).contiguous()
+        return td
+
+
+def plot():
+    import matplotlib
+    from matplotlib import pyplot as plt
+
+    is_ipython = "inline" in matplotlib.get_backend()
+    if is_ipython:
+        from IPython import display
+
+    with plt.ion():
+        plt.figure(figsize=(10, 5))
+        plt.subplot(1, 2, 1)
+        plt.plot(logs["return"])
+        plt.title("returns")
+        plt.xlabel("iteration")
+        plt.subplot(1, 2, 2)
+        plt.plot(logs["last_reward"])
+        plt.title("last reward")
+        plt.xlabel("iteration")
+        if is_ipython:
+            display.display(plt.gcf())
+            display.clear_output(wait=True)
+        plt.show()
 
 
 if __name__ == "__main__":
-    # history = HistoricData("datos/clean/merged_data.csv")
+    history = HistoricData("datos/clean/merged_data.csv")
     # train_weeks = 2
     # iteration_interval = 24
     # state = State(history, 2.2)
     # for i in range(100000):
     #     state.next_state()
-    history = HistoricData("datos/clean/merged_data.csv")
-    env = Environment(history)
-    env.reset()
-    for i in range(100000):
-        env.step(0)
+    # history = HistoricData("datos/clean/merged_data.csv")
+    # env = Environment(history)
+    # env.reset()
+    # print(env.reset())
+
+    env = Environment(dataframe_historic_data=history)
+    env = TransformedEnv(
+        env,
+        # ``Unsqueeze`` the observations that we will concatenate
+        UnsqueezeTransform(
+            unsqueeze_dim=-1,
+            in_keys=[
+                "net_power",
+                "net_power_window",
+                "pv_power",
+                "pv_power_window",
+                "light_pvpc_power",
+                "light_pvpc_window",
+                "battery_power",
+            ],
+            in_keys_inv=[
+                "net_power",
+                "net_power_window",
+                "pv_power",
+                "pv_power_window",
+                "light_pvpc_power",
+                "light_pvpc_window",
+                "battery_power",
+            ],
+        ),
+    )
+    # cat_transform = CatTensors(
+    #     in_keys=[
+    #         "net_power",
+    #         "net_power_window",
+    #         "pv_power",
+    #         "pv_power_window",
+    #         "light_pvpc_power",
+    #         "light_pvpc_window",
+    #         "battery_power",
+    #     ],
+    #     dim=-1,
+    #     out_key="observation",
+    #     del_keys=False,
+    # )
+    # env.append_transform(cat_transform)
+    check_env_specs(env)
+    # fake_tensordict = env.fake_tensordict()
+    # print(fake_tensordict.batch_size)
+    # real_tensordict=env.rollout(3,return_contiguous=True)
+    # print(real_tensordict)
+    # print(real_tensordict.batch_dims)
+    # print("observation_spec:", env.observation_spec)
+    # print("state_spec:", env.state_spec)
+    # print("reward_spec:", env.reward_spec)
+
+    # tensordict=env.reset()
+    # tensordict["action"]=torch.tensor([0.0])
+    # tensordict=env.step(tensordict)
+    # tensordict["action"]=torch.tensor([0.0])
+    # env.step(tensordict)
+
+    # print("observation_spec:", env.observation_spec)
+    # print("state_spec:", env.state_spec)
+    # print("reward_spec:", env.reward_spec)
+    # td = env.reset()
+    # print("reset tensordict", td)
+
+    # for i in range(100000):
+    #     env.step(0)
