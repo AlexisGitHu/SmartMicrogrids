@@ -31,6 +31,8 @@ if __name__ == "__main__":
             print(f"Episode {i_episode}/{n_episodes}")
     print("Training finished")
     agent.save_models()
+    final_reward=0
+    horas=0
     for i in range(10):
         observation = env.reset()
         done = False
@@ -38,5 +40,8 @@ if __name__ == "__main__":
             action = agent.choose_action(observation)
             print(f"Value for delta(B): {action}")
             new_observation, reward, done = env.step(action)
+            horas+=1
+            final_reward+=reward
             observation = new_observation
         print("Episode finished")
+        print(f"El reward final es: {final_reward/horas} €/h")

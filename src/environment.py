@@ -236,11 +236,13 @@ class State:
         partial_state_vector.append([self.actual_battery_power])
         return partial_state_vector
 
-    def next_state(self):
+    def next_state(self,action=None):
         partial_state_vector = self.historic_data.get_following_state_vector(
             self.state_vector[:3]
         )  # Historic data can only return 3 lists of values
         state_vector = self.add_actual_battery_value(partial_state_vector)
+        if action is not None:
+            self.actual_battery_power+=action
         self.update_class_variables(state_vector)
         self.iterate_batch()
         self.state_vector = copy.deepcopy(state_vector)
@@ -251,12 +253,13 @@ class Environment:
     def __init__(
         self,
         dataframe_historic_data,
+        battery_capacity=2.2,
         alpha=0.6,
     ):
 
         # self.net_installed_power = net_installed_power
         # self.pv_installed_power = pv_installed_power
-        # self.battery_capacity = battery_capacity
+        self.battery_capacity = battery_capacity
         # self.inverse_battery_capacity = inverse_battery_capacity
         self.dataframe_historic_data = dataframe_historic_data
         self.state = State(historic_data=dataframe_historic_data)
@@ -271,9 +274,11 @@ class Environment:
         # Compute the reward
         p = self.state.state_vector[0][0]
         f = self.state.state_vector[1][0]
-        reward = (
-            -p + f + action
-        ) * self.alpha  ## Esto es lo que hay que cambiar, converge a 0.
+        light_pvpc = self.state.state_vector[2][0]
+        battery_capacity_difference=self.state.state_vector[3][0]
+
+        reward=(p-f-battery_capacity_difference)*light_pvpc
+
         return reward
 
     def step(self, action):
@@ -283,8 +288,9 @@ class Environment:
         else:
             done = False
             self.current_steps += 1
+        print(action)
         reward = self.__compute_reward(action)
-        new_state = self.flatten(self.state.next_state())
+        new_state = self.flatten(self.state.next_state(action))
 
         return new_state, reward, done
 

@@ -26,6 +26,17 @@ class PPOMemory:
         np.random.shuffle(indices)
         batches = [indices[i : i + self.batch_size] for i in batch_start]
 
+        # device = T.device("cpu")
+        # return (
+        #     T.tensor(self.states, dtype=T.float32).to(device),
+        #     T.tensor(self.actions, dtype=T.float32).to(device),
+        #     T.tensor(self.probs, dtype=T.float32).to(device),
+        #     T.tensor(self.vals, dtype=T.float32).to(device),
+        #     T.tensor(self.rewards, dtype=T.float32).to(device),
+        #     T.tensor(self.dones, dtype=T.float32).to(device),
+        #     batches,
+        # )
+
         return (
             np.array(self.states),
             np.array(self.actions),
@@ -75,19 +86,18 @@ class ActorNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(fc1_dims, fc2_dims),
             nn.ReLU(),
+            nn.Linear(fc2_dims, 2)
         )
 
-        self.mu = nn.Linear(fc2_dims, n_actions)
-        self.sigma = nn.Linear(fc2_dims, n_actions)
-
         self.optimizer = optim.Adam(self.parameters(), lr=alpha)
-        self.device = T.device("cuda:0" if T.cuda.is_available() else "cpu")
+        self.device = T.device("cpu")
         self.to(self.device)
 
     def forward(self, state):
-        x = self.actor(state)
-        mu = self.mu(x)
-        sigma = F.softplus(self.sigma(x))
+        output = self.actor(state)
+
+        mu = output[:, 0]
+        sigma = F.softplus(output[:, 1])
         return mu, sigma
 
     def save_checkpoint(self):
@@ -113,7 +123,7 @@ class CriticNetwork(nn.Module):
         )
 
         self.optimizer = optim.Adam(self.parameters(), lr=alpha)
-        self.device = T.device("cuda:0" if T.cuda.is_available() else "cpu")
+        self.device = T.device("cpu")
         self.to(self.device)
 
     def forward(self, state):
@@ -164,7 +174,6 @@ class Agent:
 
     def choose_action(self, observation):
         state = T.tensor([observation], dtype=T.float).to(self.actor.device)
-
         mu, sigma = self.actor(state)
         dist = Normal(mu, sigma)
         action = dist.sample()
@@ -172,7 +181,8 @@ class Agent:
 
         vals = self.critic(state)
         self.memory.store_memory_from_action(probs.detach(), vals.detach())
-        action = T.clamp(action, min=0, max=2.2)
+        action = T.clamp(action, min=-2.2, max=2.2)
+        
         return action.item()
 
     def learn(self):
