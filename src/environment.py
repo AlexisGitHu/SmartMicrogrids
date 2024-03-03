@@ -236,13 +236,18 @@ class State:
         partial_state_vector.append([self.actual_battery_power])
         return partial_state_vector
 
-    def next_state(self,action=None):
+    def next_state(self, action=None):
         partial_state_vector = self.historic_data.get_following_state_vector(
             self.state_vector[:3]
         )  # Historic data can only return 3 lists of values
         state_vector = self.add_actual_battery_value(partial_state_vector)
         if action is not None:
-            self.actual_battery_power+=action
+            if self.actual_battery_power + action < 0:
+                self.actual_battery_power = 0
+            elif self.actual_battery_power + action > self.maximum_battery_power:
+                self.actual_battery_power = self.maximum_battery_power
+            else:
+                self.actual_battery_power += action
         self.update_class_variables(state_vector)
         self.iterate_batch()
         self.state_vector = copy.deepcopy(state_vector)
@@ -275,9 +280,38 @@ class Environment:
         p = self.state.state_vector[0][0]
         f = self.state.state_vector[1][0]
         light_pvpc = self.state.state_vector[2][0]
-        battery_capacity_difference=self.state.state_vector[3][0]
+        battery_capacity = self.state.state_vector[3][0]
 
-        reward=(p-f-battery_capacity_difference)*light_pvpc
+        if p - f > 0:  ## Si la generación es mayor que la demanda
+            if action < 0:  ## Si decido descargar la batería
+                reward = action * light_pvpc  ## Acción errónea
+            else:
+                if battery_capacity >= 1:  ## Si la batería está llena
+                    # if action > 0: # Si decido cargar la batería cuando está llena
+                    #     reward = 0 ## Acción neutral
+                    # else: # Si decido descargar la batería cuando está llena
+                    #     reward = action * light_pvpc  ## Acción errónea, estoy tirando más energía
+                    # Simplificado:
+                    reward = 0
+                else:
+                    if action + battery_capacity > 1:
+                        # Penalizo por almacenar demasiado pero premio por almacenar algo
+                        reward = (
+                            -((battery_capacity + action) - 1) * light_pvpc
+                            + (1 - battery_capacity) * light_pvpc
+                        )
+                    else:
+                        reward = action * light_pvpc
+        else:  ## Si la generación es menor que la demanda
+            if action < 0:
+                if action < -battery_capacity:
+                    reward = (
+                        action + battery_capacity
+                    ) * light_pvpc + action * light_pvpc  ## Premio parcial por descargar la batería pero más de lo debido
+                else:
+                    reward = action * light_pvpc
+            else:
+                reward = action * light_pvpc  ## Acción errónea
 
         return reward
 
