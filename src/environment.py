@@ -119,6 +119,7 @@ class HistoricData:
             actual_final_state_vector = self.get_final_state_vector(
                 self.actual_month, self.actual_day, self.actual_hour
             )
+            print(f"Ya han pasado 1024h")
         else:
             next_hour = (self.actual_hour + 1) % 24
             next_day = (self.actual_day + (self.actual_hour + 1) // 24) % len(
@@ -153,8 +154,8 @@ class State:
     def __init__(
         self,
         historic_data,
-        maximum_battery_power=2200,
-        trained_weeks=2,
+        maximum_battery_power=2.2,
+        trained_weeks=16,
         iteration_interval=24,
     ):
         self.actual_net_power: np.float64 = 0
@@ -187,50 +188,22 @@ class State:
         state_vector[2].insert(0, self.actual_light_pvpc_power)
         return state_vector
 
-    def print_batch_ended(self):
-        # print("\n", sep=" ")
-        # print(f"Terminal state ended with:")
-        # print(f"    + PV generated: {self.actual_net_power} (kW)")
-        # print(f"    + Demand: {self.actual_pv_power} (kWh)")
-        # print(f"    + PVPC light: {self.actual_light_pvpc_power} (€/kWh)")
-        # print(f"    + Battery power: {self.actual_battery_power} (kW)\n")
-        pass
 
-    def iterate_batch(self):
-        if self.hour_iterator == self.total:
-            self.historic_data.reset_actual_date()
-            self.hour_iterator = 0
-            self.print_batch_ended()
-        else:
-            self.hour_iterator += 1
-            # self.progress_bar(
-            #     self.hour_iterator,
-            # )
-
-    def progress_bar(
-        self,
-        iteration,
-        prefix="",
-        suffix="",
-        length=50,
-        fill="█",
-        print_end="\r",
-    ):
-        percent = f"{iteration}"
-        filled_length = int(length * iteration // self.total)
-        bar = fill * filled_length + "-" * (length - filled_length)
-        sys.stdout.write(
-            "\r%s |%s| %s/%s %s" % (prefix, bar, percent, self.total, suffix)
-        )
-        sys.stdout.flush()
-
-    def update_class_variables(self, state_vector):
+    def update_class_variables(self, state_vector,action):
         self.actual_net_power = state_vector[0][0]
-        self.net_power_window = np.array(state_vector[0][1:])
+        self.net_power_window = state_vector[0][1:]
         self.actual_pv_power = state_vector[1][0]
-        self.pv_power_window = np.array(state_vector[1][1:])
+        self.pv_power_window = state_vector[1][1:]
         self.actual_light_pvpc_power = state_vector[2][0]
-        self.light_pvpc_window = np.array(state_vector[2][1:])
+        self.light_pvpc_window = state_vector[2][1:]
+        if action is not None:
+            if self.actual_battery_power + action[0] < 0:
+                self.actual_battery_power = 0
+            elif self.actual_battery_power + action[0] > self.maximum_battery_power:
+                self.actual_battery_power = self.maximum_battery_power
+            else:
+                self.actual_battery_power += action[0]
+                
 
     def add_actual_battery_value(self, partial_state_vector):
         partial_state_vector.append([self.actual_battery_power])
@@ -240,109 +213,24 @@ class State:
         partial_state_vector = self.historic_data.get_following_state_vector(
             self.state_vector[:3]
         )  # Historic data can only return 3 lists of values
+        self.update_class_variables(partial_state_vector,action)
         state_vector = self.add_actual_battery_value(partial_state_vector)
-        if action is not None:
-            if self.actual_battery_power + action < 0:
-                self.actual_battery_power = 0
-            elif self.actual_battery_power + action > self.maximum_battery_power:
-                self.actual_battery_power = self.maximum_battery_power
-            else:
-                self.actual_battery_power += action
-        self.update_class_variables(state_vector)
-        self.iterate_batch()
+        # self.iterate_batch()
         self.state_vector = copy.deepcopy(state_vector)
         return state_vector
 
-
-class Environment:
-    def __init__(
-        self,
-        dataframe_historic_data,
-        battery_capacity=2.2,
-        alpha=0.6,
-    ):
-
-        # self.net_installed_power = net_installed_power
-        # self.pv_installed_power = pv_installed_power
-        self.battery_capacity = battery_capacity
-        # self.inverse_battery_capacity = inverse_battery_capacity
-        self.dataframe_historic_data = dataframe_historic_data
-        self.state = State(historic_data=dataframe_historic_data)
-        self.current_steps = 0
-        self.current_observation = None
-        self.alpha = alpha
-
-    def flatten(self, xss):
-        return [x for xs in xss for x in xs]
-
-    def __compute_reward(self, action):
-        # Compute the reward
-        p = self.state.state_vector[0][0]
-        f = self.state.state_vector[1][0]
-        light_pvpc = self.state.state_vector[2][0]
-        battery_capacity = self.state.state_vector[3][0]
-
-        if p - f > 0:  ## Si la generación es mayor que la demanda
-            if action < 0:  ## Si decido descargar la batería
-                reward = action * light_pvpc  ## Acción errónea
-            else:
-                if battery_capacity >= 1:  ## Si la batería está llena
-                    # if action > 0: # Si decido cargar la batería cuando está llena
-                    #     reward = 0 ## Acción neutral
-                    # else: # Si decido descargar la batería cuando está llena
-                    #     reward = action * light_pvpc  ## Acción errónea, estoy tirando más energía
-                    # Simplificado:
-                    reward = 0
-                else:
-                    if action + battery_capacity > 1:
-                        # Penalizo por almacenar demasiado pero premio por almacenar algo
-                        reward = (
-                            -((battery_capacity + action) - 1) * light_pvpc
-                            + (1 - battery_capacity) * light_pvpc
-                        )
-                    else:
-                        reward = action * light_pvpc
-        else:  ## Si la generación es menor que la demanda
-            if action < 0:
-                if action < -battery_capacity:
-                    reward = (
-                        action + battery_capacity
-                    ) * light_pvpc + action * light_pvpc  ## Premio parcial por descargar la batería pero más de lo debido
-                else:
-                    reward = action * light_pvpc
-            else:
-                reward = action * light_pvpc  ## Acción errónea
-
-        return reward
-
-    def step(self, action):
-        if self.current_steps == 1024:
-            done = True
-            self.current_steps = 0
-        else:
-            done = False
-            self.current_steps += 1
-        print(action)
-        reward = self.__compute_reward(action)
-        new_state = self.flatten(self.state.next_state(action))
-
-        return new_state, reward, done
-
-    def reset(self):
-        self.state = State(historic_data=self.dataframe_historic_data)
-        self.current_observation = self.flatten(self.state.next_state())
-        return self.current_observation
+    def reset_state(self):
+        self.actual_net_power = 0
+        self.net_power_window = np.zeros(23).tolist()
+        self.actual_pv_power = 0
+        self.pv_power_window = np.zeros(23).tolist()
+        self.actual_light_pvpc_power = 0
+        self.light_pvpc_window = np.zeros(23).tolist()
+        self.actual_battery_power = 0
+        self.hour_iterator = 0
+        self.state_vector = self.create_initial_state_vector()
+        self.historic_data.reset_actual_date()
 
 
 if __name__ == "__main__":
-    # history = HistoricData("datos/clean/merged_data.csv")
-    # train_weeks = 2
-    # iteration_interval = 24
-    # state = State(history, 2.2)
-    # for i in range(100000):
-    #     state.next_state()
-    history = HistoricData("datos/clean/merged_data.csv")
-    env = Environment(history)
-    env.reset()
-    for i in range(100000):
-        env.step(0)
+    pass
