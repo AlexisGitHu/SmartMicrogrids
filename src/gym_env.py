@@ -44,7 +44,7 @@ class Environment(gym.Env):
         if p - f > 0:  ## Si la generación es mayor que la demanda
             if action_value < 0:  ## Si decido descargar la batería
                 # print("CASO 1")
-                reward = action_value*light_pvpc ## Acción errónea
+                reward = 0
             else:
                 if (
                     battery_capacity >= self.maximum_battery_capacity
@@ -52,58 +52,45 @@ class Environment(gym.Env):
                     
                     if action_value < 1e-4 and action_value > -1e-4: # This avoid probability 0 of event
                         # print("CASO 2")
-                        reward = light_pvpc
+                        reward = action_value * light_pvpc
                     else:
                         # print("CASO 3")
-                        reward = -action_value*light_pvpc ## Penalización por almacenar
+                        reward = 0
                 else:
-                    if action_value > p-f:
-                        # print("Caso 4")
-                        reward=(p-f)*light_pvpc + (p-f-action_value)*light_pvpc
+                    if action_value + battery_capacity > self.maximum_battery_capacity:
+                        # print("CASO 5")
+                        reward = 0
+                        # reward=p-f*light_pvpc-(p-f-action_value)*light_pvpc
                     else:
-                        if action_value + battery_capacity > self.maximum_battery_capacity:
-                            # Penalizo por almacenar demasiado pero premio por almacenar algo
-                            # print("CASO 5")
-                            reward = (self.maximum_battery_capacity-(action_value + battery_capacity))*light_pvpc + action_value*light_pvpc 
-                            # reward=p-f*light_pvpc-(p-f-action_value)*light_pvpc
-                        else:
-                            # print("CASO 6")
-                            reward = action_value*light_pvpc
+                        # print("CASO 6")
+                        reward = action_value*light_pvpc
         elif p - f < 0:  ## Si la generación es menor que la demanda
             if action_value < 0:
                 if battery_capacity!=0:
                     if action_value < -battery_capacity:
                         # print("CASO 7")
-                        reward = (battery_capacity)*light_pvpc +action_value*light_pvpc ## Penalización por descargar demasiado, te premio por descargar algo
+                        reward = 0 ## Penalización por descargar demasiado, te premio por descargar algo
                     else:
-                        if -action_value+p < f:
-                            
-                            if battery_capacity < f:
-                                # print("CASO 8")
-                                reward=-action_value*light_pvpc
-                            else:
-                                # print("CASO 9")
-                                reward = -action_value*light_pvpc - (f+action_value-p)*light_pvpc
+                        if -action_value+p <= f:
+                            reward=-action_value*light_pvpc
                         else:
                             # print("CASO 10")
-                            # reward = -action_value*light_pvpc - (-action_value+p-f)*light_pvpc
-                            reward=(f-p)*light_pvpc + (f-p+action_value)*light_pvpc
+                            reward=0
                 else:
-                    # print("CASO 11")
-                    reward = action_value*light_pvpc
+                    reward = 0
             else:
                 # print("CASO 12")
-                reward = -action_value*light_pvpc ## Penalización por almacenar
+                reward = -action_value*light_pvpc 
         else:
-            if action_value > 1e-4:
+            if action_value > 0:
                 # print("CASO 13")
                 reward = -action_value*light_pvpc ## Penalización por almacenar
-            elif action_value < -1e-4:
+            elif action_value < 0:
                 # print("CASO 14")
-                reward = action_value*light_pvpc
+                reward = 0
             else:
                 # print("CASO 15")
-                reward = light_pvpc
+                reward = 0
         # print(f"Estados: ")
         # print(f"    + PV generated: {p} (kW)")
         # print(f"    + Demand: {f} (kWh)")
@@ -121,7 +108,8 @@ class Environment(gym.Env):
 
         return new_state, reward, terminated, truncated, {}
 
-    def reset(self,seed=None,options=None):
+    def reset(self,seed=123,options=None):
+        super().reset(seed=seed)
         self.state.reset_state()
         self.current_observation = np.array(self.flatten(self.state.next_state()),dtype=np.float32)
         return self.current_observation, {}
@@ -151,7 +139,7 @@ class Environment(gym.Env):
 if __name__ == "__main__":
     tensorboard_logs = "logs/tensorboard/"
     policy_string="MlpPolicy"
-    type_of_trial="pos_neg_rewards"
+    type_of_trial="do_nothing_env"
     trial_name=str(uuid.uuid4())
     device_cpu = device("cpu")
     gym.register("microgrid-v0", entry_point="gym_env:Environment")
@@ -160,7 +148,7 @@ if __name__ == "__main__":
     monitor_env = Monitor(env, tensorboard_logs)
     model=PPO(policy_string, monitor_env, verbose=1, tensorboard_log=tensorboard_logs,device=device_cpu)
     summary_writer = SummaryWriter(f"{tensorboard_logs}/cumulative_reward/{type_of_trial}/{trial_name}")
-    model.learn(total_timesteps=1000000,tb_log_name=f"{policy_string}_{trial_name}")
+    model.learn(total_timesteps=1000000,tb_log_name=f"{type_of_trial}/{policy_string}_{trial_name}")
     model.save(f"models/{type_of_trial}/{policy_string}_{trial_name}")
     vec_env = model.get_env()
     obs=vec_env.reset()
