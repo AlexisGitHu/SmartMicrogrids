@@ -5,7 +5,7 @@ from gymnasium.wrappers import TimeLimit
 from environment import State, HistoricData,StatesTendency
 from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 from torch.utils.tensorboard import SummaryWriter
 from torch import device
 import uuid
@@ -43,67 +43,42 @@ class Environment(gym.Env):
         action_value=action[0]
         if p - f > 0:  ## Si la generación es mayor que la demanda
             if action_value < 0:  ## Si decido descargar la batería
-                print("CASO 0")
-                reward = 0
+                # print("CASO 1")
+                reward = action_value*light_pvpc ## Acción errónea
             else:
                 if (
                     battery_capacity >= self.maximum_battery_capacity
                 ):  ## Si la batería está llena
-                    print("CASO 1")
-                    reward = -action_value * light_pvpc
+                    reward = -action_value*light_pvpc ## Penalización por almacenar
                 else:
-                    if action_value + battery_capacity > self.maximum_battery_capacity:
-                        print("CASO 2")
-                        reward=(self.maximum_battery_capacity-(battery_capacity+action_value))*light_pvpc
+                    if action_value > p-f:
+                        # print("Caso 4")
+                        reward=(p-f)*light_pvpc + (p-f-action_value)*light_pvpc
                     else:
-                        if action_value > p - f:
-                            print("CASO 3")
-                            reward = (p - f-action_value) * light_pvpc
-                        else:
-                            print("CASO 4")
-                            reward=0
+                        reward = action_value*light_pvpc
         elif p - f < 0:  ## Si la generación es menor que la demanda
-            if action_value < 0:
-                if battery_capacity!=0:
-                    if action_value < p-f:
-                        # print("CASO 7")
-                        if action_value < -battery_capacity:
-                            if -battery_capacity < p-f:
-                                print("CASO 5")
-                                reward= -(p-f)*light_pvpc
-                            else:
-                                print("CASO 6")
-                                reward=-battery_capacity*light_pvpc
+            if battery_capacity!=0:
+                if action_value < 0:
+                    if action_value < -battery_capacity:
+                        if action_value < p-f:
+                            reward=-(p-f)*light_pvpc+(battery_capacity+action_value)*light_pvpc
                         else:
-                            print("CASO 7")
-                            reward= -(p-f)*light_pvpc
+                            reward=-(action_value)*light_pvpc+(battery_capacity+action_value)*light_pvpc
                     else:
-                        if -battery_capacity < p-f:
-                            print("CASO 8")
-                            reward= -action_value*light_pvpc + (p-f-action_value)*light_pvpc
+                        if action_value < p-f:
+                            reward=-(p-f)*light_pvpc-(p-f-action_value)*light_pvpc
                         else:
-                            if action_value<-battery_capacity:
-                                print("CASO 9")
-                                reward=-battery_capacity*light_pvpc + (p-f-battery_capacity)*light_pvpc
-                            else:
-                                print("CASO 10")
-                                reward=-action_value*light_pvpc + (p-f-action_value)*light_pvpc
+                            # print("CASO 10")
+                            reward=-action_value*light_pvpc
                 else:
-                    print("CASO 11")
-                    reward = (p-f)*light_pvpc
+                    # print("CASO 12")
+                    reward = -action_value*light_pvpc 
             else:
-                print("CASO 12")
-                reward = -action_value*light_pvpc + (p-f)*light_pvpc
+                # print("CASO 11")
+                reward = (p-f)*light_pvpc
+                ## Penalización por almacenar
         else:
-            if action_value > 0:
-                print("CASO 13")
-                reward = -action_value*light_pvpc ## Penalización por almacenar
-            elif action_value < 0:
-                print("CASO 14")
-                reward = 0
-            else:
-                print("CASO 15")
-                reward = 0
+            reward=action_value*light_pvpc
         # print(f"Estados: ")
         # print(f"    + PV generated: {p} (kW)")
         # print(f"    + Demand: {f} (kWh)")
@@ -152,15 +127,13 @@ def dummy_agent(monitor_env):
     values_for_mean=[]
     for i in range(1000):
         obs=monitor_env.reset()
-        print(f"This is obs: {obs}")
         cumulatve_reward=0
-        num_steps=1000
+        num_steps=1024
         for j in range(num_steps):
             action, _states = dummy_predict(obs)
             monitor_env.print_actual_state([[action]])
             obs, reward, terminated, truncated, info = monitor_env.step([action])
             obs=(np.array(obs,dtype=np.float32),{})
-            print(f"This is 2 obs: {obs}")
             print(f"    + Reward: {reward} (€/kWh)\n")
 
             cumulatve_reward+=reward
@@ -169,6 +142,8 @@ def dummy_agent(monitor_env):
         print(f"Cumulative reward: {cumulatve_reward/num_steps} (€/kWh)")
     print(f"Mean reward dummy agent: {np.mean(values_for_mean)} (€/kWh)")
     ## MEDIA OBTENIDA EN 1000ITERS -0.04020443631297334
+    ## MEDIA OBTENIDA EN 1000ITERS CON NEW REWARD: 0.0409138078554229 (€/kWh)
+    ## MEDIA OBTENIDA EN 1000ITERS CON NEW REWARD Y BATERÍA: -0.00018065436750838094 (€/kWh) ----> FINAL REWARD
 
 def dummy_predict(obs):
     print(obs)
@@ -191,12 +166,15 @@ def dummy_predict(obs):
 def intelligent_agent(monitor_env,policy_string,type_of_trial,trial_name,tensorboard_logs,device_cpu):
     model=PPO(policy_string, monitor_env, verbose=1, tensorboard_log=tensorboard_logs,device=device_cpu)
     summary_writer = SummaryWriter(f"{tensorboard_logs}/cumulative_reward/{type_of_trial}/{trial_name}")
-    model.learn(total_timesteps=1000000,tb_log_name=f"{type_of_trial}/{policy_string}_{trial_name}")
+    eval_callback = EvalCallback(monitor_env, best_model_save_path=f'./models/best_model/{type_of_trial}',
+                             log_path=f'./logs/eval_logs/{type_of_trial}', eval_freq=20000,
+                             deterministic=True, render=False)
+    model.learn(total_timesteps=2000000,tb_log_name=f"{type_of_trial}/{policy_string}_{trial_name}",callback=eval_callback)
     model.save(f"models/{type_of_trial}/{policy_string}_{trial_name}")
     vec_env = model.get_env()
     obs=vec_env.reset()
     cumulatve_reward=0
-    num_steps=1000
+    num_steps=1024
     for i in range(num_steps):
         action, _states = model.predict(obs, deterministic=True)
         vec_env.env_method('print_actual_state',action)
@@ -209,15 +187,40 @@ def intelligent_agent(monitor_env,policy_string,type_of_trial,trial_name,tensorb
     
     summary_writer.add_scalar('Final reward', cumulatve_reward/num_steps)
 
+def try_best_intelligent_agent(monitor_env,device_cpu):
+    best_model_path="models/best_model/pos_neg_rewards_pre/best_model.zip"
+    model=PPO.load(best_model_path,env=monitor_env,device=device_cpu)
+    values_for_mean=[]
+    vec_env = model.get_env()
+    obs=vec_env.reset()
+    num_steps=1024
+    for i in range(1000):
+        cumulatve_reward=0
+        obs=vec_env.reset()
+        for j in range(num_steps):
+            action, _states = model.predict(obs, deterministic=True)
+            vec_env.env_method('print_actual_state',action)
+            obs, reward, done, info = vec_env.step(action)
+            print(f"    + Reward: {reward[0]} (€/kWh)\n")
+
+            cumulatve_reward+=reward[0]
+            vec_env.render()
+        values_for_mean.append(cumulatve_reward/num_steps)
+        print(f"Cumulative reward: {cumulatve_reward/num_steps} (€/kWh)")
+    print(f"Mean reward best agent: {np.mean(values_for_mean)} (€/kWh)")
+    #Mean reward best agent: 0.03689200113810536 (€/kWh) ----> FINAL REWARD
+
 if __name__ == "__main__":
     tensorboard_logs = "logs/tensorboard/"
     policy_string="MlpPolicy"
-    type_of_trial="dummy_predict"
+    type_of_trial="pos_neg_rewards_pre"
     trial_name=str(uuid.uuid4())
     device_cpu = device("cpu")
     gym.register("microgrid-v0", entry_point="gym_env:Environment")
     env=gym.make("microgrid-v0")
     env=TimeLimit(env, max_episode_steps=1024)
     monitor_env = Monitor(env, tensorboard_logs)
-    intelligent_agent(monitor_env,policy_string,type_of_trial,trial_name,tensorboard_logs,device_cpu)
+    try_best_intelligent_agent(monitor_env,device_cpu)
+    # intelligent_agent(monitor_env,policy_string,type_of_trial,trial_name,tensorboard_logs,device_cpu)
+    # dummy_agent(monitor_env)
     
