@@ -226,6 +226,18 @@ class State:
         self.state_vector = self.create_initial_state_vector()
         self.historic_data.reset_actual_date()
 
+    def get_actual_generation(self):
+        return self.state_vector[0][0]
+    
+    def get_actual_demand(self):
+        return self.state_vector[1][0]
+    
+    def get_actual_pvpc(self):
+        return self.state_vector[2][0]
+    
+    def get_actual_battery_capacity(self):
+        return self.state_vector[3][0]
+
 class StatesTendency:
     def __init__(self, state):
         self.state = state
