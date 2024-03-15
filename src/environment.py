@@ -155,8 +155,6 @@ class State:
         self,
         historic_data,
         maximum_battery_power=2.2,
-        trained_weeks=16,
-        iteration_interval=24,
     ):
         self.actual_net_power: np.float64 = 0
         self.net_power_window: np.NDArray[np.float64] = np.zeros(23).tolist()
@@ -171,10 +169,6 @@ class State:
         self.historic_data = historic_data
 
         self.state_vector = self.create_initial_state_vector()
-        self.trained_week = trained_weeks
-        self.iteration_interval = iteration_interval
-        self.total = self.trained_week * self.iteration_interval
-        self.hour_iterator = 0
 
     def create_initial_state_vector(self):
         state_vector = [
@@ -203,11 +197,13 @@ class State:
                 self.actual_battery_power = self.maximum_battery_power
             else:
                 self.actual_battery_power += action[0]
+
                 
 
     def add_actual_battery_value(self, partial_state_vector):
         partial_state_vector.append([self.actual_battery_power])
         return partial_state_vector
+
 
     def next_state(self, action=None):
         partial_state_vector = self.historic_data.get_following_state_vector(
@@ -215,8 +211,8 @@ class State:
         )  # Historic data can only return 3 lists of values
         self.update_class_variables(partial_state_vector,action)
         state_vector = self.add_actual_battery_value(partial_state_vector)
-        # self.iterate_batch()
         self.state_vector = copy.deepcopy(state_vector)
+        
         return state_vector
 
     def reset_state(self):
@@ -227,10 +223,83 @@ class State:
         self.actual_light_pvpc_power = 0
         self.light_pvpc_window = np.zeros(23).tolist()
         self.actual_battery_power = 0
-        self.hour_iterator = 0
         self.state_vector = self.create_initial_state_vector()
         self.historic_data.reset_actual_date()
 
+    def get_actual_generation(self):
+        return self.state_vector[0][0]
+    
+    def get_actual_demand(self):
+        return self.state_vector[1][0]
+    
+    def get_actual_pvpc(self):
+        return self.state_vector[2][0]
+    
+    def get_actual_battery_capacity(self):
+        return self.state_vector[3][0]
+
+class StatesTendency:
+    def __init__(self, state):
+        self.state = state
+        self.mwa_pvpc=0
+        self.state_vector_tendencies: np.NDArray[np.float64] = np.zeros(50).tolist()
+
+    def substitue_window_to_mwa(self,state_vector):
+        actual_pvpc=state_vector[2][0]
+        state_vector[2]=[actual_pvpc,self.mwa_pvpc]
+        return state_vector
+    
+    def substitute_window_to_tendencies(self,state_vector):
+        self.mwa_generation=self.transform_window_to_moving_average(state_vector[0][1:],len(state_vector[0][1:]))
+        self.mwa_demand=self.transform_window_to_moving_average(state_vector[1][1:],len(state_vector[1][1:]))
+        self.mwa_pvpc=self.transform_window_to_moving_average(state_vector[2][1:],len(state_vector[2][1:]))
+        actual_generation=state_vector[0][0]
+        state_vector[0]=[actual_generation,self.mwa_generation]
+        actual_demand=state_vector[1][0]
+        state_vector[1]=[actual_demand,self.mwa_demand]
+        actual_pvpc=state_vector[2][0]
+        state_vector[2]=[actual_pvpc,self.mwa_pvpc]
+
+        return state_vector
+
+    def transform_window_to_moving_average(self, window, window_size=23):
+        assert window_size < 24
+        length = len(window[1:window_size+1])
+        average=0
+        for i in range(length):
+            average += window[i+1]*(i+1)/(window_size*(window_size+1)/2)
+
+        return np.float16(average)
+    
+    
+    def next_state(self,action=None):
+        state_vector=self.state.next_state(action)
+        state_vector=self.substitute_window_to_tendencies(state_vector)
+        return state_vector
+    
+    def reset_state(self):
+        self.state.reset_state()
+        self.mwa_pvpc=0
+    
+    def get_actual_generation(self):
+        return self.state.state_vector[0][0]
+    
+    def get_actual_demand(self):
+        return self.state.state_vector[1][0]
+    
+    def get_actual_pvpc(self):
+        return self.state.state_vector[2][0]
+    
+    def get_actual_battery_capacity(self):
+        return self.state.state_vector[3][0]
+    
+
 
 if __name__ == "__main__":
-    pass
+    historical=HistoricData("datos/clean/merged_data.csv")
+    state=State(historical)
+    states_tendency=StatesTendency(state)
+    states_tendency.next_state()
+    states_tendency.reset_state()
+    states_tendency.next_state()
+
