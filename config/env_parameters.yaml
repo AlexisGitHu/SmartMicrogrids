@@ -1,2 +1,2 @@
 MAXIMUM_BATTERY_CAPACITY: 2.2 # kWh
-STATES_TENDENCY: False # True or False
+STATES_TENDENCY: True # True or False

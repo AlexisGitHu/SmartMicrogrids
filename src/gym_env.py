@@ -56,22 +56,20 @@ class Environment(gym.Env):
         light_pvpc = self.state.get_actual_pvpc()
         battery_capacity = self.state.get_actual_battery_capacity()
         action_value=action[0]
-        if p - f > 0:  ## Si la generación es mayor que la demanda
-            if action_value < 0:  ## Si decido descargar la batería
-                # print("CASO 1")
-                reward = action_value*light_pvpc ## Acción errónea
+        if p - f > 0: 
+            if action_value < 0:  
+                reward = action_value*light_pvpc 
             else:
                 if (
                     battery_capacity >= self.maximum_battery_capacity
-                ):  ## Si la batería está llena
-                    reward = -action_value*light_pvpc ## Penalización por almacenar
+                ):  
+                    reward = -action_value*light_pvpc 
                 else:
                     if action_value > p-f:
-                        # print("Caso 4")
                         reward=(p-f)*light_pvpc + (p-f-action_value)*light_pvpc
                     else:
                         reward = action_value*light_pvpc
-        elif p - f < 0:  ## Si la generación es menor que la demanda
+        elif p - f < 0: 
             if battery_capacity!=0:
                 if action_value < 0:
                     if action_value < -battery_capacity:
@@ -83,24 +81,13 @@ class Environment(gym.Env):
                         if action_value < p-f:
                             reward=-(p-f)*light_pvpc-(p-f-action_value)*light_pvpc
                         else:
-                            # print("CASO 10")
                             reward=-action_value*light_pvpc
                 else:
-                    # print("CASO 12")
                     reward = -action_value*light_pvpc 
             else:
-                # print("CASO 11")
                 reward = (p-f)*light_pvpc
-                ## Penalización por almacenar
         else:
-            reward=action_value*light_pvpc
-        # print(f"Estados: ")
-        # print(f"    + PV generated: {p} (kW)")
-        # print(f"    + Demand: {f} (kWh)")
-        # print(f"    + PVPC light: {light_pvpc} (€/kWh)")
-        # print(f"    + Battery power: {battery_capacity} (kW)")
-        # print(f"    + Action: {action} (kW)")
-        # print(f"    + Reward: {reward} (€/kWh)\n")
+            reward=0
         return reward
 
     def step(self, action):
@@ -118,9 +105,6 @@ class Environment(gym.Env):
         return self.current_observation, {}
     
     def render(self, action=None, mode='human'):
-        # Render the environment
-        # The details of this method will depend on the nature of your environment
-        # For a text-based environment, you could simply print some information
         print("Rendering the environment")
     
     def close(self):
@@ -132,11 +116,11 @@ class Environment(gym.Env):
         light_pvpc = self.state.get_actual_pvpc()
         battery_capacity = self.state.get_actual_battery_capacity()
         print(f"Estados: ")
-        print(f"    + PV generated: {p} (kW)")
-        print(f"    + Demand: {f} (kWh)")
-        print(f"    + PVPC light: {light_pvpc} (€/kWh)")
-        print(f"    + Battery power: {battery_capacity} (kW)")
-        print(f"    + Action: {action[0][0]} (kW)")
+        print(f"    + Generación: {p} (kWh)")
+        print(f"    + Demanda: {f} (kWh)")
+        print(f"    + PVPC: {light_pvpc} (€/kWh)")
+        print(f"    + Capacidad batería: {battery_capacity} (kW)")
+        print(f"    + Acción: {action[0][0]} (kW)")
 
 def dummy_agent(monitor_env):
     values_for_mean=[]
@@ -194,7 +178,7 @@ def intelligent_agent(monitor_env,policy_string,type_of_trial,trial_name,tensorb
         action, _states = model.predict(obs, deterministic=True)
         vec_env.env_method('print_actual_state',action)
         obs, reward, done, info = vec_env.step(action)
-        print(f"    + Reward: {reward[0]} (€/kWh)\n")
+        # print(f"    + Reward: {reward[0]} (€/kWh)\n")
 
         cumulatve_reward+=reward[0]
         vec_env.render()
@@ -216,7 +200,7 @@ def try_best_intelligent_agent(monitor_env,device_cpu):
             action, _states = model.predict(obs, deterministic=True)
             vec_env.env_method('print_actual_state',action)
             obs, reward, done, info = vec_env.step(action)
-            print(f"    + Reward: {reward[0]} (€/kWh)\n")
+            print(f"    + Recompensa: {reward[0]} (€/kWh)\n")
 
             cumulatve_reward+=reward[0]
             vec_env.render()
@@ -265,7 +249,7 @@ def recurrent_intelligent_agent(monitor_env,policy_string,type_of_trial,trial_na
         action, _states = model.predict(obs, deterministic=True)
         vec_env.env_method('print_actual_state',action)
         obs, reward, done, info = vec_env.step(action)
-        print(f"    + Reward: {reward[0]} (€/kWh)\n")
+        # print(f"    + Reward: {reward[0]} (€/kWh)\n")
 
         cumulatve_reward+=reward[0]
         vec_env.render()
@@ -284,8 +268,8 @@ if __name__ == "__main__":
     env=TimeLimit(env, max_episode_steps=1024)
     monitor_env = Monitor(env, tensorboard_logs)
     # recurrent_intelligent_agent(monitor_env,policy_string,type_of_trial,trial_name,tensorboard_logs,device_cpu)
-    # try_best_intelligent_agent(monitor_env,device_cpu,best_model_path)
-    try_best_recurrent_intelligent_agent(monitor_env,device_cpu)
+    try_best_intelligent_agent(monitor_env,device_cpu)
+    # try_best_recurrent_intelligent_agent(monitor_env,device_cpu)
     # intelligent_agent(monitor_env,policy_string,type_of_trial,trial_name,tensorboard_logs,device_cpu)
     # dummy_agent(monitor_env)
     
