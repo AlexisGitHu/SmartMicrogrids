@@ -1,2 +1,9 @@
 MAXIMUM_BATTERY_CAPACITY: 2.2 # kWh
-STATES_TENDENCY: False # True or False
+STATES_TENDENCY: True # True or False
+ALGORITHM_NAME: "A2C"
+POLICY_STRING: "MlpPolicy"
+TYPE_OF_TRIAL: "pos_neg_rewards"
+TENSORBOARD_LOGS: "logs/tensorboard/"
+DEVICE: "cpu"
+BEST_MODEL_FINAL_PATH: "models/best_model_A2C/pos_neg_rewards/States/cd7c839e-fa31-42d7-92b0-122c67473af1/best_model.zip"
+

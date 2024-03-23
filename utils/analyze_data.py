@@ -1,4 +1,5 @@
 import pandas as pd
+from pingouin import multivariate_normality 
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import re
@@ -28,7 +29,6 @@ class DataAnalyzerConsumption:
         self.data["Consumo (kWh)"] = (
             self.data["Consumo (kWh)"].str.replace(",", ".").astype(float)
         )
-        # print(self.data.columns)
         grouped_data = self.data.groupby(["ID"])
         # Get unique IDs
         for group_name, group_data in grouped_data:
@@ -135,6 +135,7 @@ class DataAnalyzerRadiation:
         plt.xticks(rotation=45)
         plt.savefig(f"graficos/radiacion/radiacion_time_series.png", bbox_inches='tight')
         plt.show()
+
 
 
 if __name__ == "__main__":

@@ -1,11 +1,8 @@
 import numpy as np
 
-import pandas as pd
 from random import choice as random_choice
 from dataframe_handler import get_dataframe_from_file
 import copy
-import time
-import sys
 
 
 class HistoricData:
@@ -140,8 +137,7 @@ class HistoricData:
             actual_final_state_vector = self.get_next_value(
                 self.actual_month, self.actual_day, self.actual_hour, state_vector
             )
-            # print(f"Esto es none?: {actual_final_state_vector}")
-        # print(self.actual_month, self.actual_day, self.actual_hour)
+            
         return actual_final_state_vector
 
     def reset_actual_date(self):

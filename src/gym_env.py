@@ -1,5 +1,6 @@
+import time
 import numpy as np
-
+from scipy import stats
 import gymnasium as gym
 from gymnasium.wrappers import TimeLimit
 from environment import State, HistoricData, StatesTendency
@@ -11,6 +12,8 @@ from torch.utils.tensorboard import SummaryWriter
 from torch import device
 import uuid
 import yaml
+import pandas as pd
+from pingouin import multivariate_normality
 
 with open("config/env_parameters.yaml", "r") as ymlfile:
     cfg = yaml.safe_load(ymlfile)
@@ -146,7 +149,13 @@ class Environment(gym.Env):
         print(f"    + Acción: {action[0][0]} (kW)")
 
 
-def dummy_agent(monitor_env, tensorboard_logs, type_of_trial, trial_name, algorithm_name="DummyAgent"):
+def dummy_agent(
+    monitor_env,
+    tensorboard_logs,
+    type_of_trial,
+    trial_name,
+    algorithm_name="DummyAgent",
+):
     summary_writer = SummaryWriter(
         f"{tensorboard_logs}/cumulative_reward/{algorithm_name}/{type_of_trial}/{trial_name}"
     )
@@ -168,9 +177,6 @@ def dummy_agent(monitor_env, tensorboard_logs, type_of_trial, trial_name, algori
         print(f"Cumulative reward: {cumulatve_reward/num_steps} (€/kWh)")
     print(f"Mean reward dummy agent: {np.mean(values_for_mean)} (€/kWh)")
     summary_writer.add_scalar("Final 1000 iters mean reward", np.mean(values_for_mean))
-    ## MEDIA OBTENIDA EN 1000ITERS -0.04020443631297334
-    ## MEDIA OBTENIDA EN 1000ITERS CON NEW REWARD: 0.0409138078554229 (€/kWh)
-    ## MEDIA OBTENIDA EN 1000ITERS CON NEW REWARD Y BATERÍA: -0.00018065436750838094 (€/kWh) ----> FINAL REWARD
 
 
 def dummy_predict(obs):
@@ -207,7 +213,7 @@ def intelligent_agent(
         best_model_save_path=f"./models/best_model_{algorithm_name}/{type_of_trial}/{states_tendency_str}/{trial_name}",
         log_path=f"./logs/eval_logs_{algorithm_name}/{type_of_trial}/{states_tendency_str}/{trial_name}",
         eval_freq=20000,
-        deterministic=True,
+        deterministic=False,
         render=False,
     )
     model.learn(
@@ -220,7 +226,7 @@ def intelligent_agent(
     cumulatve_reward = 0
     num_steps = 1024
     for i in range(num_steps):
-        action, _states = model.predict(obs, deterministic=True)
+        action, _states = model.predict(obs, deterministic=False)
         vec_env.env_method("print_actual_state", action)
         obs, reward, done, info = vec_env.step(action)
         print(f"    + Reward: {reward[0]} (€/kWh)\n")
@@ -254,7 +260,7 @@ def try_best_intelligent_agent(
         cumulatve_reward = 0
         obs = vec_env.reset()
         for j in range(num_steps):
-            action, _states = model.predict(obs, deterministic=True)
+            action, _states = model.predict(obs, deterministic=False)
             vec_env.env_method("print_actual_state", action)
             obs, reward, done, info = vec_env.step(action)
             print(f"    + Recompensa: {reward[0]} (€/kWh)\n")
@@ -265,8 +271,6 @@ def try_best_intelligent_agent(
         print(f"Cumulative reward: {cumulatve_reward/num_steps} (€/kWh)")
     print(f"Mean reward best agent: {np.mean(values_for_mean)} (€/kWh)")
     summary_writer.add_scalar("Final 1000 iters mean reward", np.mean(values_for_mean))
-    # Mean reward best agent: 0.03689200113810536 (€/kWh) ----> FINAL REWARD
-    # Mean reward best agent RECURRENT: 0.0349054472593508 (€/kWh) ----> FINAL REWARD
 
 
 def recurrent_intelligent_agent(
@@ -288,7 +292,7 @@ def recurrent_intelligent_agent(
         best_model_save_path=f"./models/best_model_recurrent/{type_of_trial}",
         log_path=f"./logs/eval_logs_recurrent/{type_of_trial}",
         eval_freq=20000,
-        deterministic=True,
+        deterministic=False,
         render=False,
     )
     model.learn(
@@ -296,13 +300,12 @@ def recurrent_intelligent_agent(
         tb_log_name=f"{type_of_trial}/{policy_string}_{trial_name}",
         callback=eval_callback,
     )
-    # model.save(f"models/{type_of_trial}/{policy_string}_{trial_name}")
     vec_env = model.get_env()
     obs = vec_env.reset()
     cumulatve_reward = 0
     num_steps = 1024
     for i in range(num_steps):
-        action, _states = model.predict(obs, deterministic=True)
+        action, _states = model.predict(obs, deterministic=False)
         vec_env.env_method("print_actual_state", action)
         obs, reward, done, info = vec_env.step(action)
         # print(f"    + Reward: {reward[0]} (€/kWh)\n")
@@ -314,14 +317,99 @@ def recurrent_intelligent_agent(
     summary_writer.add_scalar("Final reward", cumulatve_reward / num_steps)
 
 
+def samples_from_predictions(model_trained, best_model_path, monitor_env, device_cpu):
+    model = model_trained.load(best_model_path, env=monitor_env, device=device_cpu)
+    vector_state_buffer_for = []
+    final_states_list = []
+    vec_env = model.get_env()
+    obs = vec_env.reset()
+    range_data = 72
+    iterations = 1000
+    num_steps = 1024
+    for i in range(iterations):
+        obs = vec_env.reset()
+        vector_state_buffer_for.append(obs[0][0:range_data])
+        for j in range(num_steps):
+            action, _states = model.predict(obs, deterministic=False)
+            obs, reward, done, info = vec_env.step(action)
+            if j == num_steps - 1 and i == iterations - 1:
+                pass
+            else:
+                vector_state_buffer_for.append(obs[0][0:range_data])
+            vec_env.render()
+    for i in vector_state_buffer_for:
+        final_states_list.append(i.tolist())
+    return final_states_list
+
+
+def check_normality(
+    model,
+    monitor_env,
+    device_cpu,
+    best_model_final_path,
+):
+
+    vector_state_buffer = samples_from_predictions(
+        model, best_model_final_path, monitor_env, device_cpu
+    )
+    df = pd.DataFrame(vector_state_buffer)
+    print(df)
+    result = multivariate_normality(df)
+    print(result)
+
+
+def levenes_test_actions(tensorboard_logs, monitor_env, device_cpu):
+    best_model_ppo = "models/best_model_PPO/pos_neg_rewards/StatesTendency/d8dc1a6f-8f36-4499-9927-28e42744040f/best_model.zip"
+    best_model_trpo = "models/best_model_TRPO/pos_neg_rewards/StatesTendency/33c8d54c-c839-4e96-9863-cae353ad6a38/best_model.zip"
+    best_model_a2c = "models/best_model_A2C/pos_neg_rewards/StatesTendency/a8764d89-ee33-411c-a16b-8c0db8b88ab7/best_model.zip"
+    # best_model_recurrent_ppo = "models/best_model_RecurrentPPO/pos_neg_rewards/States/4ea6fa6e-0929-4408-a10d-20edea98a653/best_model.zip"
+    best_models_list = [
+        best_model_a2c,
+        best_model_ppo,
+        best_model_trpo,
+    ]
+    columns = 5
+    actions_columns_list = []
+    for best_model in best_models_list:
+        if "RecurrentPPO" in best_model:
+            policy_string = "MlpLstmPolicy"
+            algorithm_name = "RecurrentPPO"
+        else:
+            policy_string = "MlpPolicy"
+            if "TRPO" in best_model:
+                algorithm_name = "TRPO"
+            elif "PPO" in best_model:
+                algorithm_name = "PPO"
+            elif "A2C" in best_model:
+                algorithm_name = "A2C"
+        model = eval(algorithm_name)(
+            policy_string,
+            monitor_env,
+            verbose=1,
+            tensorboard_log=tensorboard_logs,
+            device=device,
+        )
+        vector_state_buffer = samples_from_predictions(
+            model, best_model, monitor_env, device_cpu
+        )
+        df = pd.DataFrame(vector_state_buffer)
+        float_list = pd.to_numeric(df[columns], errors="coerce").dropna().tolist()
+        actions_columns_list.append(np.array(float_list))
+
+    stat, p = stats.levene(*actions_columns_list)
+    print("Statistic:", stat)
+    print("p-value:", p)
+
+
 if __name__ == "__main__":
-    tensorboard_logs = "logs/tensorboard/"
-    policy_string = "MlpPolicy"
-    type_of_trial = "pos_neg_rewards"
-    algorithm_name = "A2C"
+    tensorboard_logs = cfg["TENSORBOARD_LOGS"]
+    policy_string = cfg["POLICY_STRING"]
+    type_of_trial = cfg["TYPE_OF_TRIAL"]
+    algorithm_name = cfg["ALGORITHM_NAME"]
     states_tendency_str = "StatesTendency" if cfg["STATES_TENDENCY"] else "States"
     trial_name = str(uuid.uuid4())
-    device_cpu = device("cpu")
+    device = device(cfg["DEVICE"])
+    best_model_final_path = cfg["BEST_MODEL_FINAL_PATH"]
     gym.register(
         "microgrid-v0",
         entry_point="gym_env:Environment",
@@ -333,33 +421,29 @@ if __name__ == "__main__":
     env = gym.make("microgrid-v0")
     env = TimeLimit(env, max_episode_steps=1024)
     monitor_env = Monitor(env, tensorboard_logs)
-    # model=PPO(policy_string, monitor_env, verbose=1, tensorboard_log=tensorboard_logs,device=device_cpu)
-    # model = A2C(
-    #     policy_string,
-    #     monitor_env,
-    #     verbose=1,
-    #     tensorboard_log=tensorboard_logs,
-    #     device=device_cpu,
-    # )
-    # recurrent_intelligent_agent(monitor_env,policy_string,type_of_trial,trial_name,tensorboard_logs,device_cpu)
-    # try_best_recurrent_intelligent_agent(monitor_env,device_cpu)
-    # best_model_final_path = intelligent_agent(
-    #     model,
-    #     monitor_env,
-    #     policy_string,
-    #     type_of_trial,
-    #     trial_name,
-    #     states_tendency_str,
-    #     algorithm_name=algorithm_name,
-    # )
-    # try_best_intelligent_agent(
-    #     model,
-    #     best_model_final_path,
-    #     monitor_env,
-    #     device_cpu,
-    #     tensorboard_logs,
-    #     type_of_trial,
-    #     states_tendency_str,
-    #     algorithm_name=algorithm_name,
-    # )
-    dummy_agent(monitor_env, tensorboard_logs, type_of_trial, trial_name)
+    model = eval(algorithm_name)(
+        policy_string,
+        monitor_env,
+        verbose=1,
+        tensorboard_log=tensorboard_logs,
+        device=device,
+    )
+    best_model_final_path = intelligent_agent(
+        model,
+        monitor_env,
+        policy_string,
+        type_of_trial,
+        trial_name,
+        states_tendency_str,
+        algorithm_name=algorithm_name,
+    )
+    try_best_intelligent_agent(
+        model,
+        best_model_final_path,
+        monitor_env,
+        device,
+        tensorboard_logs,
+        type_of_trial,
+        states_tendency_str,
+        algorithm_name=algorithm_name,
+    )
