@@ -1,4 +1,3 @@
-# Inicio
 <h1 align="center">
   <img style="vertical-align:middle" height="200"
   src="https://github.com/AlexisGitHu/SmartMicrogrids/assets/56341573/f110e00e-92a7-4b09-9a05-b571c0f11afa">
