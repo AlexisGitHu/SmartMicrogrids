@@ -1,16 +1,13 @@
 # Inicio
 <h1 align="center">
   <img style="vertical-align:middle" height="200"
-  src="./docs/_static/imgs/logo.png">
+  src="https://github.com/AlexisGitHu/SmartMicrogrids/assets/56341573/f110e00e-92a7-4b09-9a05-b571c0f11afa">
 </h1>
 <p align="center">
   <i>Optimización inteligente de baterías fotovoltaicas</i>
 </p>
 
 <p align="center">
-    <a href="https://github.com/explodinggradients/ragas/releases">
-        <img alt="GitHub release" src="https://github.com/AlexisGitHu/SmartMicrogrids/assets/56341573/f110e00e-92a7-4b09-9a05-b571c0f11afa" width="300" height="300">
-    </a>
     <a href="https://www.python.org/">
             <img alt="Build" src="https://img.shields.io/badge/Made%20with-Python-1f425f.svg?color=purple">
     </a>
