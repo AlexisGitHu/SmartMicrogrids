@@ -10,7 +10,7 @@
     <a href="https://www.python.org/">
             <img alt="Build" src="https://img.shields.io/badge/Made%20with-Python-1f425f.svg?color=purple">
     </a>
-    <a href="https://github.com/explodinggradients/ragas/">
+    <a href="https://github.com/AlexisGitHu/SmartMicrogrids/">
         <img alt="Downloads" src="https://badges.frapsoft.com/os/v1/open-source.svg?v=103">
     </a>
 </p>
