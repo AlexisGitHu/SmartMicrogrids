@@ -1,11 +1,7 @@
 # SmartMicrogrids
-Repositorio de código para el TFG de la rama de INSO, Smart Microgrids.
+Este es el repositorio de código para el TFG **Optimización inteligente de baterías fotovoltaicas**  de la rama de INSO de Alexis Gómez Chimeno.
 
+Se puede encontrar todo el código utilizado para hacer los desarrollos pertinentes descritos en la memoria.
 
-No limitar la capacidad que debe decidir el agente para cargar, pudiendo estar tirando de red eléctrica.
+Asimismo, incluye los modelos entrenados de los agentes para que puedan ser abiertamente usados.
 
-Recompensar negativamente el extra que cargo en la batería y tiro de la red eléctrica, pero esto tiene sentido porque puede seguir camino óptimo.
-
-1. Terminar episodio cuando excedo los límites físicos.
-
-2. Hacer nada...
