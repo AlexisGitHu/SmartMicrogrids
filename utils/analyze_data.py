@@ -1,4 +1,5 @@
 import pandas as pd
+from pingouin import multivariate_normality 
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import re
@@ -28,7 +29,6 @@ class DataAnalyzerConsumption:
         self.data["Consumo (kWh)"] = (
             self.data["Consumo (kWh)"].str.replace(",", ".").astype(float)
         )
-        # print(self.data.columns)
         grouped_data = self.data.groupby(["ID"])
         # Get unique IDs
         for group_name, group_data in grouped_data:
@@ -55,7 +55,7 @@ class DataAnalyzerConsumption:
                     color="#1f77b4",
                 )
             plt.xticks(rotation=45)
-            plt.savefig(f"graficos/consumo/plot_{group_name[0]}.png")
+            plt.savefig(f"graficos/consumo/plot_{group_name[0]}.png", bbox_inches='tight')
             plt.show()
 
 
@@ -92,9 +92,9 @@ class DataAnalyzerPvpc:
         ax.set_title(f"PVPC - Peninsula Ibérica")
         ax.legend().set_visible(False)
         ax.set_xlabel("Fecha")
-        ax.set_ylabel("PVPC (kWh)")
+        ax.set_ylabel("PVPC (€/kWh)")
         plt.xticks(rotation=45)
-        plt.savefig(f"graficos/pvpc/pvpc_time_series.png")
+        plt.savefig(f"graficos/pvpc/pvpc_time_series.png", bbox_inches='tight')
         plt.show()
 
 
@@ -128,13 +128,14 @@ class DataAnalyzerRadiation:
                 label=month_str,
                 color="#1f77b4",
             )
-        ax.set_title(f"P (kW) - Madrid")
+        ax.set_title(f"Generación fotovoltaica - Madrid")
         ax.legend().set_visible(False)
         ax.set_xlabel("Fecha")
-        ax.set_ylabel("P (kW)")
+        ax.set_ylabel("P (kWh)")
         plt.xticks(rotation=45)
-        plt.savefig(f"graficos/radiacion/radiacion_time_series.png")
+        plt.savefig(f"graficos/radiacion/radiacion_time_series.png", bbox_inches='tight')
         plt.show()
+
 
 
 if __name__ == "__main__":
