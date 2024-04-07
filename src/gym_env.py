@@ -256,7 +256,8 @@ def try_best_intelligent_agent(
     vec_env = model.get_env()
     obs = vec_env.reset()
     num_steps = 1024
-    for i in range(1000):
+    num_iterations = 1000
+    for i in range(num_iterations):
         cumulatve_reward = 0
         obs = vec_env.reset()
         for j in range(num_steps):
@@ -271,6 +272,7 @@ def try_best_intelligent_agent(
         print(f"Cumulative reward: {cumulatve_reward/num_steps} (€/kWh)")
     print(f"Mean reward best agent: {np.mean(values_for_mean)} (€/kWh)")
     summary_writer.add_scalar("Final 1000 iters mean reward", np.mean(values_for_mean))
+    return values_for_mean
 
 
 def recurrent_intelligent_agent(
@@ -400,6 +402,9 @@ def levenes_test_actions(tensorboard_logs, monitor_env, device_cpu):
     print("Statistic:", stat)
     print("p-value:", p)
 
+def iterations_values_to_csv(values_for_mean: list[float],algorithm_name:str,state_tendency_str:str):
+    df = pd.DataFrame({"List_of_rewards": values_for_mean})
+    df.to_csv(f"results/{algorithm_name}_{state_tendency_str}.csv", index=False)
 
 if __name__ == "__main__":
     tensorboard_logs = cfg["TENSORBOARD_LOGS"]
@@ -437,7 +442,8 @@ if __name__ == "__main__":
         states_tendency_str,
         algorithm_name=algorithm_name,
     )
-    try_best_intelligent_agent(
+    # best_model_final_path=cfg["BEST_MODEL_FINAL_PATH"]
+    values_for_mean=try_best_intelligent_agent(
         model,
         best_model_final_path,
         monitor_env,
@@ -447,3 +453,4 @@ if __name__ == "__main__":
         states_tendency_str,
         algorithm_name=algorithm_name,
     )
+    iterations_values_to_csv(values_for_mean,algorithm_name,states_tendency_str)
